@@ -1,0 +1,15 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# model checkpoints (regenerable build artifacts)
+*.pt
+
+# dataset build caches
+*.pkl
+
+# plots: exclude all except the current val-curve figure
+/plots/*.png
+!/plots/val_curves_joint4.png
