@@ -14,6 +14,7 @@ the flat, tokenized representation those ids get packed into.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Union
 
 import numpy as np
 import torch
@@ -47,7 +48,7 @@ class CategoricalSpec:
     categories: list[str]
 
 
-ParamSpec = NumericSpec | CategoricalSpec
+ParamSpec = Union[NumericSpec, CategoricalSpec]  # runtime alias -> py3.9-safe (not PEP 604)
 
 
 @dataclass

@@ -4,6 +4,8 @@ confirm the mean loss drops and inspect whether the variance head collapses.
     /home/andi/venv/bin/python scripts/smoke_train.py
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

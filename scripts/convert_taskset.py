@@ -18,6 +18,8 @@ filtered at LOAD time (data/taskset.py), not here -- this just mirrors the raw d
     python scripts/convert_taskset.py --n-tasks 300   # first 300 (reproducible)
 """
 
+from __future__ import annotations
+
 import argparse
 import io
 import re

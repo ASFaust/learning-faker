@@ -7,6 +7,8 @@ whitening yet -- that's a downstream concern).
     /home/andi/venv/bin/python scripts/pca_tasks.py
 """
 
+from __future__ import annotations
+
 import pickle
 import sys
 from pathlib import Path
