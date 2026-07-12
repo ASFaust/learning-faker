@@ -2,3 +2,4 @@ numpy
 torch
 h5py         # fcnet loader (hdf5)
 matplotlib   # plotting scripts
+optuna       # hyperparameter search (lcfaker.hpo)

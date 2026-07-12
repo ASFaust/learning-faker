@@ -37,6 +37,8 @@ class ModelConfig:
     num_freq_bands: int = 7
     dropout: float = 0.5       # aggressive: between the readout's gated layers
     emb_dropout: float = 0.2   # lighter: on z only (time features left intact)
+    block: str = "gated"       # readout block type: "gated" (GLU) or "silu" (Linear+SiLU)
+    n_layers: int = 2          # readout depth: blocks before the output head
     # residual-quantile levels (denser in the tails, where divergence lives)
     tau_levels: tuple = (0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98)
 
@@ -102,6 +104,21 @@ class GatedLayer(nn.Module):
         return self.value(x) * torch.sigmoid(self.gate(x))
 
 
+class DenseLayer(nn.Module):
+    """Plain Linear + SiLU: the non-gated readout block. Half the params of a
+    GatedLayer (no gate branch) -- the HPO picks between the two."""
+
+    def __init__(self, d_in: int, d_out: int) -> None:
+        super().__init__()
+        self.lin = nn.Linear(d_in, d_out)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.silu(self.lin(x))
+
+
+_BLOCKS = {"gated": GatedLayer, "silu": DenseLayer}
+
+
 class Readout(nn.Module):
     """(z, time_features) -> monotone ABSOLUTE quantiles of log(loss/ref) for BOTH
     channels from ONE shared MLP (no per-channel heads). The final layer emits
@@ -119,22 +136,29 @@ class Readout(nn.Module):
     """
 
     def __init__(self, d_in: int, hidden: int, n_q: int,
-                 dropout: float = 0.0, emb_dropout: float = 0.0) -> None:
+                 dropout: float = 0.0, emb_dropout: float = 0.0,
+                 block: str = "gated", n_layers: int = 2) -> None:
         super().__init__()
         self.n_q = n_q
         # emb_dropout hits z (embedding + config sum-pool) only, forcing the readout
         # off any single embedding dimension; the time features are left intact so
         # the head keeps a clean monotone-in-t signal. The heavier `dropout` between
-        # the gated layers regularizes the net's only nonlinear depth (the sum-pool
-        # backbone is linear).
+        # the blocks regularizes the net's only nonlinear depth (the sum-pool
+        # backbone is linear). block/n_layers are HPO-tunable; the defaults
+        # (gated, 2) reproduce the original two-GatedLayer readout exactly.
         self.emb_drop = nn.Dropout(emb_dropout)
-        self.mlp = nn.Sequential(
-            GatedLayer(d_in, hidden),
-            nn.Dropout(dropout),
-            GatedLayer(hidden, hidden),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, n_q * 2),
-        )
+        if block not in _BLOCKS:
+            raise ValueError(f"unknown readout block {block!r}; choose from {list(_BLOCKS)}")
+        if n_layers < 1:
+            raise ValueError(f"n_layers must be >= 1, got {n_layers}")
+        Block = _BLOCKS[block]
+        layers: list[nn.Module] = []
+        d = d_in
+        for _ in range(n_layers):
+            layers += [Block(d, hidden), nn.Dropout(dropout)]
+            d = hidden
+        layers.append(nn.Linear(d, n_q * 2))
+        self.mlp = nn.Sequential(*layers)
 
     def forward(self, z: torch.Tensor, tfeat: torch.Tensor) -> torch.Tensor:
         raw = self.mlp(torch.cat([self.emb_drop(z), tfeat], dim=-1))  # (B, 2*Q)
@@ -161,7 +185,8 @@ class LearningCurveModel(nn.Module):
         # one shared MLP emits both channels' absolute quantiles (pinball-only,
         # median-centric); readout width decoupled from the embedding width d.
         self.readout = Readout(d + self.time.dim, self.cfg.hidden_dim, n_q,
-                               self.cfg.dropout, self.cfg.emb_dropout)
+                               self.cfg.dropout, self.cfg.emb_dropout,
+                               self.cfg.block, self.cfg.n_layers)
         self.register_buffer("taus", torch.tensor(self.cfg.tau_levels, dtype=torch.float32))
         self.median_idx = int(torch.argmin((self.taus - 0.5).abs()))  # tau closest to 0.5
 
