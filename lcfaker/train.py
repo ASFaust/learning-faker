@@ -30,26 +30,27 @@ def build_source(name: str):
     if name == "lcbench":
         from .data.lcbench import load_lcbench
         return load_lcbench()
+    from .config import DATA_ROOT
     from .data.build import build_joint
     from .data.fcnet import FCNetSource
     from .data.lcbench import LCBenchSource
     from .data.pd1 import PD1Source
     from .data.taskset import TaskSetSource
     if name == "pd1":
-        return build_joint([PD1Source()], cache_path="/home/andi/datasets/pd1/pd1.parsed.pkl")
+        return build_joint([PD1Source()], cache_path=str(DATA_ROOT / "pd1" / "pd1.parsed.pkl"))
     if name == "fcnet":
-        return build_joint([FCNetSource()], cache_path="/home/andi/datasets/fcnet/fcnet.parsed.pkl")
+        return build_joint([FCNetSource()], cache_path=str(DATA_ROOT / "fcnet" / "fcnet.parsed.pkl"))
     if name == "taskset":
-        return build_joint([TaskSetSource()], cache_path="/home/andi/datasets/taskset_local/taskset.pkl")
+        return build_joint([TaskSetSource()], cache_path=str(DATA_ROOT / "taskset_local" / "taskset.pkl"))
     if name == "joint":  # LCBench + PD1
         return build_joint([LCBenchSource(), PD1Source()],
-                           cache_path="/home/andi/datasets/joint_lcbench_pd1.pkl")
+                           cache_path=str(DATA_ROOT / "joint_lcbench_pd1.pkl"))
     if name == "joint3":  # LCBench + PD1 + FCNet
         return build_joint([LCBenchSource(), PD1Source(), FCNetSource()],
-                           cache_path="/home/andi/datasets/joint3.pkl")
+                           cache_path=str(DATA_ROOT / "joint3.pkl"))
     if name == "joint4":  # + TaskSet (hundreds of tasks)
         return build_joint([LCBenchSource(), PD1Source(), FCNetSource(), TaskSetSource()],
-                           cache_path="/home/andi/datasets/joint4.pkl")
+                           cache_path=str(DATA_ROOT / "joint4.pkl"))
     raise ValueError(name)
 
 

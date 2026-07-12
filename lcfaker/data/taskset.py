@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..config import DATA_ROOT
 from .taskset_samplers import ADAM8P_PARAMS
 
 # adam8p param -> transform. betas are 1-log so live in (0,1); decays/eps/l1/l2 log.
@@ -66,7 +67,7 @@ def _excluded(stem: str) -> bool:
 class TaskSetSource:
     name = "taskset"
 
-    def __init__(self, dir: str = "/home/andi/datasets/taskset_local",
+    def __init__(self, dir: str = str(DATA_ROOT / "taskset_local"),
                  max_configs: int | None = None):
         self.dir = Path(dir)
         self.max_configs = max_configs

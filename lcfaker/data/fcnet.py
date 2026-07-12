@@ -17,6 +17,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from ..config import DATA_ROOT
+
 DATASETS = {
     "protein": "fcnet_protein_structure_data.hdf5",
     "slice": "fcnet_slice_localization_data.hdf5",
@@ -40,7 +42,7 @@ PARAM_MAP = {
 class FCNetSource:
     name = "fcnet"
 
-    def __init__(self, dir: str = "/home/andi/datasets/fcnet/fcnet_tabular_benchmarks",
+    def __init__(self, dir: str = str(DATA_ROOT / "fcnet" / "fcnet_tabular_benchmarks"),
                  max_configs: int = 2000, seed: int = 0):
         self.dir = Path(dir)
         self.max_configs = max_configs

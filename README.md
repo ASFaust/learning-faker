@@ -54,6 +54,13 @@ excluded — they converge to machine precision and aren't real learning curves.
 
 ## Usage
 
+Datasets are expected under `LCFAKER_DATA_ROOT` (env var, default
+`/home/andi/datasets`); set it to relocate all data and build caches:
+
+```bash
+export LCFAKER_DATA_ROOT=/shared/work/lcfaker_data   # layout: <root>/{lcbench,pd1,fcnet,taskset_local}/...
+```
+
 ```bash
 python -m lcfaker.train --source joint4 --epochs 20   # build + train (writes checkpoint_joint4.pt)
 python scripts/plot_val_curves.py                     # held-out real-vs-predicted curves

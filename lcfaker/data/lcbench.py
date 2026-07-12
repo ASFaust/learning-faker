@@ -20,9 +20,12 @@ from pathlib import Path
 
 import numpy as np
 
+from ..config import DATA_ROOT
 from ..schema import NumericSpec
 from ..vocab import Vocabulary
 from .base import IndexedCurveDataset
+
+DEFAULT_PATH = str(DATA_ROOT / "lcbench" / "data_2k_lw.json")
 
 VAL_KEY = "Train/val_cross_entropy"
 TRAIN_KEY = "Train/train_cross_entropy"
@@ -45,7 +48,7 @@ class LCBenchSource:
 
     name = "lcbench"
 
-    def __init__(self, path: str = "/home/andi/datasets/lcbench/data_2k_lw.json",
+    def __init__(self, path: str = DEFAULT_PATH,
                  max_datasets: int | None = None, max_configs: int | None = None):
         self.path = path
         self.max_datasets = max_datasets
@@ -73,7 +76,7 @@ class LCBenchSource:
 
 
 def load_lcbench(
-    path: str = "/home/andi/datasets/lcbench/data_2k_lw.json",
+    path: str = DEFAULT_PATH,
     max_datasets: int | None = None,
     max_configs: int | None = None,
     cache: bool = True,

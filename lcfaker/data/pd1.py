@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..config import DATA_ROOT
+
 # config param name -> (pd1 column, transform)
 PARAM_MAP = {
     "batch_size":      ("hps.batch_size", "log"),
@@ -34,7 +36,7 @@ def _arr(x):
 class PD1Source:
     name = "pd1"
 
-    def __init__(self, dir: str = "/home/andi/datasets/pd1/pd1", files: list[str] | None = None):
+    def __init__(self, dir: str = str(DATA_ROOT / "pd1" / "pd1"), files: list[str] | None = None):
         self.dir = Path(dir)
         self.files = files or DEFAULT_FILES
 
