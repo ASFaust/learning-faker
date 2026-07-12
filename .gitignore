@@ -10,6 +10,9 @@ __pycache__/
 # dataset build caches
 *.pkl
 
+# training run artifacts (per-epoch checkpoints + history)
+/runs/
+
 # plots: exclude all except the current val-curve figure
 /plots/*.png
 !/plots/val_curves_joint4.png

@@ -12,8 +12,10 @@ watch for the collapse we flagged.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
+from pathlib import Path
 
 # Enumerate GPUs in PCIe bus order (matches nvidia-smi) rather than CUDA's default
 # "fastest first" -- so --gpu N picks the Nth device as nvidia-smi lists it. Must be
@@ -124,6 +126,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--gpu", type=int, default=0,
                     help="CUDA device index in PCIe/nvidia-smi order (see CUDA_DEVICE_ORDER)")
+    ap.add_argument("--out-dir", default=None,
+                    help="run dir for per-epoch checkpoints + history.json (default: runs/<source>)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -161,6 +165,11 @@ def main():
 
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_at)
 
+    out_dir = Path(args.out_dir or f"runs/{args.source}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"run dir: {out_dir}")
+    history, best_val, best_ep = [], float("inf"), -1
+
     for ep in range(args.epochs):
         model.train()
         agg = {}
@@ -182,9 +191,29 @@ def main():
         print(f"[ep {ep:2d}] train pinball={agg['pinball']:.4f} "
               f"| val mae={ev['mae_val']:.4f}/{ev['mae_train']:.4f} pinball={ev['pinball']:.4f} {cov}")
 
+        # per-epoch record (history.json) + checkpoint; best tracked by val pinball
+        record = {"epoch": ep, "lr": sched.get_last_lr()[0],
+                  "train_pinball": agg["pinball"], "val_mae_val": ev["mae_val"],
+                  "val_mae_train": ev["mae_train"], "val_pinball": ev["pinball"],
+                  **{f"val_{k}": ev[k] for k in ev if k.startswith("cov")}}
+        history.append(record)
+        ckpt = {"model": model.state_dict(), "cfg": model.cfg.__dict__,
+                "epoch": ep, "source": args.source, "metrics": record}
+        torch.save(ckpt, out_dir / f"epoch_{ep:03d}.pt")
+        if ev["pinball"] < best_val:
+            best_val, best_ep = ev["pinball"], ep
+            torch.save(ckpt, out_dir / "best_val_loss.pt")
+        # rewrite history every epoch so a crashed/killed run is still reconstructable
+        with open(out_dir / "history.json", "w") as f:
+            json.dump({"source": args.source, "args": vars(args),
+                       "best_epoch": best_ep, "best_val_pinball": best_val,
+                       "history": history}, f, indent=2)
+
+    # keep a top-level final checkpoint for the plotting scripts
     torch.save({"model": model.state_dict(), "cfg": model.cfg.__dict__},
                f"checkpoint_{args.source}.pt")
-    print(f"saved checkpoint_{args.source}.pt")
+    print(f"done. best val pinball {best_val:.4f} @ epoch {best_ep} "
+          f"({out_dir}/best_val_loss.pt); final -> checkpoint_{args.source}.pt")
 
 
 if __name__ == "__main__":
