@@ -59,7 +59,13 @@ Datasets are expected under `LCFAKER_DATA_ROOT` (env var, default
 
 ```bash
 export LCFAKER_DATA_ROOT=/shared/work/lcfaker_data   # layout: <root>/{lcbench,pd1,fcnet,taskset_local}/...
+python scripts/download_datasets.py                  # fetch all 4 into that root (idempotent)
 ```
+
+`download_datasets.py` pulls LCBench/PD1/FCNet archives and reconstructs TaskSet from
+GCS (recovering per-config HPs from their seeds). TaskSet selection is deterministic
+and nested — `--taskset-n-tasks 300 ⊂ 800 ⊂ all` (~1162) — so you can extend the task
+set later with a bigger re-run; existing tasks are skipped.
 
 ```bash
 python -m lcfaker.train --source joint4 --epochs 20   # build + train (writes checkpoint_joint4.pt)
