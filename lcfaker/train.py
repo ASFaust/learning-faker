@@ -13,6 +13,12 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
+
+# Enumerate GPUs in PCIe bus order (matches nvidia-smi) rather than CUDA's default
+# "fastest first" -- so --gpu N picks the Nth device as nvidia-smi lists it. Must be
+# set before torch initializes CUDA, hence up here before `import torch`.
+os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 
 import numpy as np
 import torch
@@ -116,10 +122,20 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--gpu", type=int, default=0,
+                    help="CUDA device index in PCIe/nvidia-smi order (see CUDA_DEVICE_ORDER)")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        if not 0 <= args.gpu < torch.cuda.device_count():
+            raise SystemExit(f"--gpu {args.gpu} out of range (found {torch.cuda.device_count()} GPUs)")
+        torch.cuda.set_device(args.gpu)
+        device = f"cuda:{args.gpu}"
+        print(f"using {device}: {torch.cuda.get_device_name(args.gpu)}")
+    else:
+        device = "cpu"
+        print("no CUDA -> cpu")
 
     ds, vocab = build_source(args.source)
     train_ds, val_ds = config_split(ds, args.val_frac, args.seed)
