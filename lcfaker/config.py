@@ -5,7 +5,7 @@ taken from the environment and defaulting to /home/andi/datasets. To relocate al
 data -- e.g. on a server where it must live under /shared/work -- set the env var
 once before running:
 
-    export LCFAKER_DATA_ROOT=/shared/work/lcfaker_data
+    export LCFAKER_DATA_ROOT=/mnt/ssd01/home/work/lcfaker_data
 
 The expected layout under the root is:
     <root>/lcbench/data_2k_lw.json

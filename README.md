@@ -58,7 +58,7 @@ Datasets are expected under `LCFAKER_DATA_ROOT` (env var, default
 `/home/andi/datasets`); set it to relocate all data and build caches:
 
 ```bash
-export LCFAKER_DATA_ROOT=/shared/work/lcfaker_data   # layout: <root>/{lcbench,pd1,fcnet,taskset_local}/...
+export LCFAKER_DATA_ROOT=/mnt/ssd01/home/work/lcfaker_data   # layout: <root>/{lcbench,pd1,fcnet,taskset_local}/...
 ```
 
 ```bash
