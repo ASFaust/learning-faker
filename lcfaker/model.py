@@ -6,7 +6,7 @@ value-scaled direction (numeric) or a categorical embedding -- and these are
 summed with the task embedding.
 
     z = task_emb + Σ_p token_vec(p)          # permutation-invariant, variable-length
-    z, time_features(t_rel) --head--> mean + residual quantiles (val & train)
+    z, time_features(t_rel) --readout MLP--> monotone quantiles (val & train)
 
 Rationale: with few, low-interaction HP tokens the task embedding absorbs
 constant-within-task context and the downstream time-MLP models any interactions,
@@ -32,8 +32,11 @@ from .vocab import Vocabulary
 
 @dataclass
 class ModelConfig:
-    d_model: int = 128
-    num_freq_bands: int = 6
+    d_model: int = 32
+    hidden_dim: int = 128
+    num_freq_bands: int = 7
+    dropout: float = 0.5       # aggressive: between the readout's gated layers
+    emb_dropout: float = 0.2   # lighter: on z only (time features left intact)
     # residual-quantile levels (denser in the tails, where divergence lives)
     tau_levels: tuple = (0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98)
 
@@ -99,30 +102,46 @@ class GatedLayer(nn.Module):
         return self.value(x) * torch.sigmoid(self.gate(x))
 
 
-class CurveHead(nn.Module):
-    """(z, time_features) -> monotone ABSOLUTE quantiles of log(loss/ref) for one
-    channel. A single MLP with Q outputs turned into a non-decreasing sequence via
-    q0 + cumsum(softplus) (guaranteed no quantile crossing). Pinball-only, no
-    separate mean: the point estimate is the median (tau=0.5) quantile, which is
-    L1-optimal, robust to the divergence tail, and -- being the band center by
-    construction -- can never fall outside its own percentiles the way an MSE mean
-    does on skewed predictions. E[y] is recoverable from the quantile integral if a
-    risk-neutral objective ever needs it.
+class Readout(nn.Module):
+    """(z, time_features) -> monotone ABSOLUTE quantiles of log(loss/ref) for BOTH
+    channels from ONE shared MLP (no per-channel heads). The final layer emits
+    n_q*2 logits, reshaped to (B, 2, Q); each channel's Q values are made
+    non-decreasing via q0 + cumsum(softplus) (guaranteed no quantile crossing).
+
+    Pinball-only, no separate mean: the point estimate is the median (tau=0.5)
+    quantile, which is L1-optimal, robust to the divergence tail, and -- being the
+    band center by construction -- can never fall outside its own percentiles the
+    way an MSE mean does on skewed predictions. E[y] is recoverable from the
+    quantile integral if a risk-neutral objective ever needs it.
+
+    hidden width is decoupled from d_model: the embedding/backbone width and the
+    readout width are set independently (hidden_dim).
     """
 
-    def __init__(self, d_model: int, t_dim: int, n_q: int) -> None:
+    def __init__(self, d_in: int, hidden: int, n_q: int,
+                 dropout: float = 0.0, emb_dropout: float = 0.0) -> None:
         super().__init__()
+        self.n_q = n_q
+        # emb_dropout hits z (embedding + config sum-pool) only, forcing the readout
+        # off any single embedding dimension; the time features are left intact so
+        # the head keeps a clean monotone-in-t signal. The heavier `dropout` between
+        # the gated layers regularizes the net's only nonlinear depth (the sum-pool
+        # backbone is linear).
+        self.emb_drop = nn.Dropout(emb_dropout)
         self.mlp = nn.Sequential(
-            nn.Linear(d_model + t_dim, d_model), nn.GELU(),
-            GatedLayer(d_model, d_model),
-            nn.Linear(d_model, n_q),
+            GatedLayer(d_in, hidden),
+            nn.Dropout(dropout),
+            GatedLayer(hidden, hidden),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, n_q * 2),
         )
 
     def forward(self, z: torch.Tensor, tfeat: torch.Tensor) -> torch.Tensor:
-        raw = self.mlp(torch.cat([z, tfeat], dim=-1))          # (B, Q)
-        q0 = raw[:, :1]
-        deltas = F.softplus(raw[:, 1:])                        # (B, Q-1) > 0
-        return torch.cat([q0, q0 + torch.cumsum(deltas, dim=-1)], dim=-1)  # (B, Q)
+        raw = self.mlp(torch.cat([self.emb_drop(z), tfeat], dim=-1))  # (B, 2*Q)
+        raw = raw.view(raw.shape[0], 2, self.n_q)              # (B, 2, Q)  [val, train]
+        q0 = raw[..., :1]
+        deltas = F.softplus(raw[..., 1:])                      # (B, 2, Q-1) > 0
+        return torch.cat([q0, q0 + torch.cumsum(deltas, dim=-1)], dim=-1)  # (B, 2, Q)
 
 
 class Prediction(NamedTuple):
@@ -139,9 +158,10 @@ class LearningCurveModel(nn.Module):
         self.task_emb = nn.Embedding(vocab.n_tasks, d)
         self.time = TimeFeatures(self.cfg.num_freq_bands)
         n_q = len(self.cfg.tau_levels)
-        # one absolute-quantile head per channel (pinball-only, median-centric)
-        self.head_val = CurveHead(d, self.time.dim, n_q)
-        self.head_train = CurveHead(d, self.time.dim, n_q)
+        # one shared MLP emits both channels' absolute quantiles (pinball-only,
+        # median-centric); readout width decoupled from the embedding width d.
+        self.readout = Readout(d + self.time.dim, self.cfg.hidden_dim, n_q,
+                               self.cfg.dropout, self.cfg.emb_dropout)
         self.register_buffer("taus", torch.tensor(self.cfg.tau_levels, dtype=torch.float32))
         self.median_idx = int(torch.argmin((self.taus - 0.5).abs()))  # tau closest to 0.5
 
@@ -160,10 +180,10 @@ class LearningCurveModel(nn.Module):
     def forward(self, b: Batch, task_emb: torch.Tensor | None = None) -> Prediction:
         z = self.encode(b, task_emb)
         tf = self.time(b.t_rel)
-        # (B, 2, Q) absolute quantiles; the heads share the encoder gradient (cheap
+        # (B, 2, Q) absolute quantiles; the readout shares the encoder gradient (cheap
         # sum-pool, bounded pinball), which also lets pinball inform the fitted task
         # embedding during test-time inversion.
-        q = torch.stack([self.head_val(z, tf), self.head_train(z, tf)], dim=1)
+        q = self.readout(z, tf)                                  # (B, 2, Q)  [val, train]
         median = q[:, :, self.median_idx]                       # (B, 2) point estimate
         return Prediction(q, median)
 

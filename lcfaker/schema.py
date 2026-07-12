@@ -76,8 +76,15 @@ class Batch:
     t_rel: torch.Tensor      # (B,)  float  fraction of task budget in [0, 1]
     y: torch.Tensor          # (B, 2) float  normalized log-loss log(loss/ref) [val, train]
 
-    def to(self, device) -> "Batch":
-        return Batch(**{k: v.to(device) for k, v in self.__dict__.items()})
+    def to(self, device, non_blocking: bool = False) -> "Batch":
+        return Batch(**{k: v.to(device, non_blocking=non_blocking)
+                        for k, v in self.__dict__.items()})
+
+    def pin_memory(self) -> "Batch":
+        # DataLoader(pin_memory=True) dispatches to this because Batch is a custom
+        # type (not Tensor/Mapping/Sequence); without it the flag is a silent no-op
+        # and non_blocking H2D copies wouldn't actually overlap with compute.
+        return Batch(**{k: v.pin_memory() for k, v in self.__dict__.items()})
 
     def __len__(self) -> int:
         return self.type_ids.shape[0]

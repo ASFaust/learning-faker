@@ -9,9 +9,13 @@ Targets are per-task-normalized log(loss/ref); we recover absolute loss with
 loss = exp(y_norm + log ref_task) for reals, predicted mean, and quantiles alike,
 so the panels read in real cross-entropy / loss units.
 
-    /home/andi/venv/bin/python scripts/plot_val_curves.py
+    python scripts/plot_val_curves.py [checkpoint.pt] [out.png]
+
+Defaults to the top-level checkpoint_joint4.pt; pass a checkpoint (e.g. the
+best-val one under runs/joint4/best_val_loss.pt) and an output path to override.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -27,12 +31,21 @@ from lcfaker.data.base import collate           # noqa: E402
 from lcfaker.model import LearningCurveModel, ModelConfig  # noqa: E402
 from lcfaker.train import build_source           # noqa: E402
 
-CKPT = Path(__file__).resolve().parents[1] / "checkpoint_joint4.pt"
-OUT = Path(__file__).resolve().parents[1] / "plots" / "val_curves_joint4.png"
+ROOT = Path(__file__).resolve().parents[1]
+CKPT = ROOT / "checkpoint_joint4.pt"
+OUT = ROOT / "plots" / "val_curves_joint4.png"
 PER_DATASET = 4  # configs spanning the loss range per dataset -> 4x4 grid
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("ckpt", nargs="?", default=str(CKPT),
+                    help="checkpoint .pt (default: top-level checkpoint_joint4.pt)")
+    ap.add_argument("out", nargs="?", default=str(OUT),
+                    help="output png path")
+    args = ap.parse_args()
+    ckpt_path, out_path = Path(args.ckpt), Path(args.out)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     ds, vocab = build_source("joint4")
 
@@ -62,7 +75,7 @@ def main():
         idxs = np.linspace(0, len(members) - 1, PER_DATASET).round().astype(int)
         picks.extend(members[i] for i in idxs)
 
-    ckpt = torch.load(CKPT, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device)
     model = LearningCurveModel(vocab, ModelConfig(**ckpt["cfg"])).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
@@ -110,9 +123,9 @@ def main():
     fig.suptitle("joint4 held-out configs: real vs predicted (bands = residual central 50% / 90%)",
                  fontsize=13)
     fig.tight_layout()
-    OUT.parent.mkdir(exist_ok=True)
-    fig.savefig(OUT, dpi=110)
-    print(f"saved {OUT}  ({len(picks)} panels)")
+    out_path.parent.mkdir(exist_ok=True)
+    fig.savefig(out_path, dpi=110)
+    print(f"saved {out_path}  ({len(picks)} panels)")
 
 
 if __name__ == "__main__":

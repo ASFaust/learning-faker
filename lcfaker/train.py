@@ -98,7 +98,7 @@ def evaluate(model, dl, device):
     mae, cov = [], {c: [] for c, _, _ in pairs}
     pin = []
     for b in dl:
-        b = b.to(device)
+        b = b.to(device, non_blocking=True)
         pred = model(b)
         mae.append((pred.median - b.y).abs().cpu())
         for c, lo, hi in pairs:
@@ -121,7 +121,7 @@ def main():
                              "joint", "joint3", "joint4", "synthetic"])
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--batch-size", type=int, default=1024)
-    ap.add_argument("--lr", type=float, default=3e-3)
+    ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--val-frac", type=float, default=0.1)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--gpu", type=int, default=0,
@@ -146,10 +146,16 @@ def main():
     print(f"source={args.source} points={len(ds)} "
           f"(train={len(train_ds)} val={len(val_ds)}) tasks={vocab.n_tasks} device={device}")
 
+    # workers prep+collate batches ahead of the GPU; pin_memory + non_blocking .to()
+    # (below) overlaps the H2D copy with compute, and persistent_workers keeps the
+    # pool alive across all epochs instead of re-forking every epoch.
+    pin = device != "cpu"
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                          collate_fn=collate, num_workers=4, drop_last=True)
+                          collate_fn=collate, num_workers=4, drop_last=True,
+                          pin_memory=pin, persistent_workers=True, prefetch_factor=4)
     val_dl = DataLoader(val_ds, batch_size=4096, shuffle=False,
-                        collate_fn=collate, num_workers=2)
+                        collate_fn=collate, num_workers=2,
+                        pin_memory=pin, persistent_workers=True, prefetch_factor=4)
 
     model = LearningCurveModel(vocab, ModelConfig()).to(device)
     print(f"model params: {sum(p.numel() for p in model.parameters())/1e3:.1f}k")
@@ -174,7 +180,7 @@ def main():
         model.train()
         agg = {}
         for b in train_dl:
-            b = b.to(device)
+            b = b.to(device, non_blocking=True)
             pred = model(b)
             loss, mq = pinball_loss(pred, b.y, model.taus)
             opt.zero_grad(); loss.backward()
