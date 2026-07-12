@@ -44,24 +44,22 @@ class Source(Protocol):
 
 
 def build_joint(sources: list[Source], cache_path: str | None = None,
-                loss_cap_mult: float | None = 20.0, tau_ref: float = 0.05,
-                ref_pct: float = 25.0):
+                loss_cap_mult: float | None = 20.0):
     """Returns (IndexedCurveDataset, Vocabulary).
 
     Targets are PER-TASK-NORMALIZED log-loss: y = log(loss / ref_task), where
-    ref_task is the ref_pct-th percentile (p25) over the task's runs of the val
-    loss at the first observation with t_rel >= tau_ref (i.e. "val loss after
-    ~tau_ref of the budget's worth of initial training" -- past the init spike,
-    uniform across epoch- and step-timed datasets). We take p25 rather than the
-    median because on tasks where most sampled configs diverge early the median
-    is itself a diverged value; p25 tracks a SENSIBLE config's baseline, matching
-    the test-time protocol (train a bit with a sensible config -> read val loss
-    -> divide by it), and collapses to ~median on well-behaved tight-baseline
-    tasks (e.g. VAEs at ~1e4 nats). The SAME ref divides both channels, so the
-    train/val gap is preserved, and it only re-centers each task to a common
-    ballpark (log ref -> 0 at the reference point) without whitening the dynamic
-    range. ref_task is stored on the dataset & vocab so seen-task generation can
-    multiply back and test-time embedding inversion can replay the protocol.
+    ref_task = MEDIAN over the task's runs of the val loss at the FIRST observation
+    (index 0 = the initial loss). The initial loss is divergence-immune (at init no
+    config has diverged yet, so configs cluster at the architecture's init loss;
+    within-task max/min ~1.0 for healthy tasks) and the median is robust to the
+    diverged minority -- so even PD1 (first obs ~step 1000) and FCNet get a sane
+    anchor. This replaced a p25-of-loss-at-t_rel>=5% anchor that got CONTAMINATED on
+    tasks where many configs diverge by 5% (a real RNN task got ref=1.9e4). See
+    docs/task_selection.md. The SAME ref divides both channels (preserves the
+    train/val gap) and only re-centers each task to a common ballpark. ref_task is
+    stored on the dataset & vocab so seen-task generation can multiply back and
+    test-time embedding inversion can replay the protocol (eval a sensible config at
+    init -> read val loss -> divide by it).
 
     loss_cap_mult caps the OBSERVED loss at loss_cap_mult * ref_task (i.e. y at
     log(loss_cap_mult)) on the diverged (upper) side, so diverged runs -- which
@@ -106,31 +104,18 @@ def build_joint(sources: list[Source], cache_path: str | None = None,
                     raw_numeric[name].append(float(val))
         print(f"[build] {src.name}: {len(records) - n0} configs")
 
-    # ref pass: per-task normalizer = p{ref_pct} over runs of the first val loss
-    # at t_rel >= tau_ref (past the init spike; p25 tracks a sensible config, not
-    # the diverged tail). Fallback to the first finite val loss for tasks whose
-    # every run is too short to reach tau_ref.
-    tau_samples: dict[str, list[float]] = defaultdict(list)
-    first_samples: dict[str, list[float]] = defaultdict(list)
+    # ref pass: per-task normalizer = median over runs of the INITIAL val loss
+    # (first finite observation, index 0). Divergence-immune + median-robust.
+    init_samples: dict[str, list[float]] = defaultdict(list)
     for rec in records:
-        ok = np.isfinite(rec.y_val) & (rec.y_val > 0)
-        if not ok.any():
-            continue
-        budget = task_budget[rec.task_key] or 1.0
-        trel = rec.t_abs / budget
-        okidx = np.where(ok)[0]
-        first_samples[rec.task_key].append(float(rec.y_val[okidx[np.argmin(trel[okidx])]]))
-        cand = np.where(ok & (trel >= tau_ref))[0]
-        if cand.size:
-            tau_samples[rec.task_key].append(float(rec.y_val[cand[np.argmin(trel[cand])]]))
+        ok = np.where(np.isfinite(rec.y_val) & (rec.y_val > 0))[0]  # time-ordered
+        if ok.size:
+            init_samples[rec.task_key].append(float(rec.y_val[ok[0]]))
     task_ref: dict[str, float] = {}
     n_fallback = 0
     for task_key in vocab.task_id:
-        if tau_samples.get(task_key):
-            task_ref[task_key] = float(np.percentile(tau_samples[task_key], ref_pct))
-        elif first_samples.get(task_key):
-            task_ref[task_key] = float(np.percentile(first_samples[task_key], ref_pct))
-            n_fallback += 1
+        if init_samples.get(task_key):
+            task_ref[task_key] = float(np.median(init_samples[task_key]))
         else:
             task_ref[task_key] = 1.0  # no finite val loss at all; no-op divisor
             n_fallback += 1

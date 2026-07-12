@@ -37,6 +37,31 @@ _BS = re.compile(r"[Bb][Ss](\d+)")
 # 17 orders below the deepest real task fcnet/naval at 4.8e-5.)
 _EXCLUDE = ("quadratic_family", "TwoD_Bowl", "losg_tasks_family")
 
+# Majority-diverging real tasks: >50% of their sampled HP configs diverge before
+# the first observation, so even the MEDIAN initial loss (our per-task anchor) is a
+# diverged value and every config gets garbage targets. Excluded per-task (not
+# per-family -- most seeds of these families are fine). Identified via
+# scripts/find_diverging_tasks.py: median-init > 10x the family-median-init.
+# See docs/task_selection.md.
+_DIVERGING = frozenset({
+    "rnn_text_classification_family_seed58", "rnn_text_classification_family_seed70",
+    "rnn_text_classification_family_seed96",
+    "mlp_ae_family_seed39", "mlp_ae_family_seed48", "mlp_ae_family_seed62",
+    "mlp_family_seed39", "mlp_family_seed43", "mlp_family_seed49", "mlp_family_seed78",
+    "conv_fc_family_seed36", "conv_fc_family_seed38", "conv_fc_family_seed40",
+    "conv_fc_family_seed70", "conv_pooling_family_seed91",
+    "char_rnn_language_model_family_seed38", "char_rnn_language_model_family_seed39",
+    "word_rnn_language_model_family_seed4", "word_rnn_language_model_family_seed8",
+    "word_rnn_language_model_family_seed39", "nvp_family_seed75",
+})
+
+
+def _excluded(stem: str) -> bool:
+    if any(x in stem for x in _EXCLUDE):          # synthetic families (substring)
+        return True
+    key = re.sub(r"_?[Bb][Ss]\d+", "", stem)      # strip BS suffix -> task key
+    return key in _DIVERGING                       # diverging tasks (exact)
+
 
 class TaskSetSource:
     name = "taskset"
@@ -52,7 +77,7 @@ class TaskSetSource:
     def records(self):
         from .build import RawRecord
         for path in sorted(self.dir.glob("*.npz")):
-            if any(x in path.stem for x in _EXCLUDE):
+            if _excluded(path.stem):
                 continue
             d = np.load(path)
             hp, curves, steps = d["hparams"], d["curves"], d["steps"]  # (N,8),(N,T,2),(T,)
